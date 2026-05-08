@@ -1,0 +1,2829 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SUT Hospital — Asset Tracking (Full Integration)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Kanit', sans-serif;
+            background: #0a0a14;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* HEADER */
+        .header {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            height: 64px;
+            z-index: 1000;
+            background: linear-gradient(135deg, #E65100 0%, #BF360C 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            justify-content: space-between;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .tab-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tab-btn {
+            padding: 8px 20px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: transparent;
+            color: white;
+            cursor: pointer;
+            transition: 0.3s;
+            font-size: 0.82rem;
+            font-family: 'Kanit', sans-serif;
+        }
+
+        .tab-btn.active {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: white;
+            font-weight: 600;
+        }
+
+        /* Indoor ETA info sections in the info panel */
+        .info-section-divider {
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            margin: 8px 0;
+        }
+
+        .info-eta-block {
+            background: rgba(255, 179, 0, 0.06);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+        }
+
+        .info-eta-block .eta-label {
+            font-size: 0.6rem;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+
+        .info-eta-block .eta-value {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .info-eta-block .eta-value.green {
+            color: #81c784;
+        }
+
+        .info-eta-block .eta-value.amber {
+            color: #ffcc80;
+        }
+
+        .info-eta-block .eta-value.blue {
+            color: #90caf9;
+        }
+
+        /* Indoor pulse effect on the building floor */
+        .building-floor.active .indoor-pulse {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #fb8c00;
+            box-shadow: 0 0 8px #fb8c00;
+        }
+
+        .building-floor.active .indoor-pulse::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            background: #fb8c00;
+            opacity: 0.4;
+            animation: indoorPulseRing 1.8s ease-in-out infinite;
+        }
+
+        @keyframes indoorPulseRing {
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 0.4;
+            }
+
+            50% {
+                transform: scale(2.2);
+                opacity: 0;
+            }
+        }
+
+        .status-online {
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            background: #4caf50;
+            border-radius: 50%;
+            animation: dotPulse 2s ease-in-out infinite;
+        }
+
+        @keyframes dotPulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* VIEW SECTIONS */
+        .view-section {
+            display: none;
+            height: 100vh;
+            width: 100%;
+            padding-top: 64px;
+            position: absolute;
+            top: 0;
+        }
+
+        .view-section.active {
+            display: flex;
+        }
+
+        /* MAP VIEW */
+        #mapContainer {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            background: #111;
+        }
+
+        /* BUILDING VIEW */
+        #buildingContainer {
+            flex: 1;
+            position: relative;
+            display: none;
+            background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a14 100%);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .building-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .building-title {
+            color: #fb8c00;
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        .building-title small {
+            display: block;
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 300;
+        }
+
+        .css-building {
+            display: flex;
+            flex-direction: column;
+            width: 240px;
+            background: #111;
+            border: 2px solid #222;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            box-shadow: -10px 0 30px rgba(0, 0, 0, 0.8), 10px 0 30px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(0, 0, 0, 0.9);
+            position: relative;
+        }
+
+        .css-building::after {
+            content: '';
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 4px;
+            background: #f00;
+            border-radius: 50%;
+            animation: beaconBlink 1.5s infinite;
+        }
+
+        @keyframes beaconBlink {
+
+            0%,
+            49% {
+                opacity: 1;
+                box-shadow: 0 0 15px #f00;
+            }
+
+            50%,
+            100% {
+                opacity: 0.2;
+                box-shadow: none;
+            }
+        }
+
+        .building-floor {
+            height: 42px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-bottom: 1px solid #222;
+            position: relative;
+            transition: all 0.4s ease;
+            background: transparent;
+        }
+
+        .building-floor span {
+            position: absolute;
+            left: -50px;
+            color: rgba(255, 255, 255, 0.35);
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .building-floor.active {
+            background: rgba(251, 140, 0, 0.25);
+            border-top: 2px solid #fb8c00;
+            border-bottom: 2px solid #fb8c00;
+            box-shadow: 0 0 30px rgba(251, 140, 0, 0.5), inset 0 0 15px rgba(251, 140, 0, 0.3);
+        }
+
+        .building-floor.active span {
+            color: #fff;
+            font-size: 1.3rem;
+            left: -55px;
+            text-shadow: 0 0 10px #fb8c00;
+        }
+
+        .building-floor.active::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: rgba(251, 140, 0, 0.4);
+            animation: floorPulse 1.2s infinite alternate;
+        }
+
+        @keyframes floorPulse {
+            0% {
+                opacity: 0.6;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .floor-label {
+            position: absolute;
+            right: -160px;
+            background: #fb8c00;
+            color: #fff;
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(251, 140, 0, 0.4);
+            display: none;
+            animation: labelPop 0.4s ease-out;
+        }
+
+        .floor-label::before {
+            content: '';
+            position: absolute;
+            left: -8px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 4px solid transparent;
+            border-right-color: #fb8c00;
+        }
+
+        .building-floor.active .floor-label {
+            display: block;
+        }
+
+        @keyframes labelPop {
+            from {
+                opacity: 0;
+                transform: translateX(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* INFO PANEL */
+        .info-panel {
+            position: absolute;
+            top: 84px;
+            left: 20px;
+            width: 280px;
+            z-index: 900;
+            background: rgba(20, 20, 20, 0.88);
+            backdrop-filter: blur(12px);
+            border-radius: 14px;
+            padding: 18px;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .mode-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .mode-outdoor {
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+        }
+
+        .mode-indoor {
+            background: rgba(251, 140, 0, 0.2);
+            color: #fb8c00;
+        }
+
+        /* HISTORY VIEW */
+        .history-container {
+            background: #F5F7FA;
+            height: 100%;
+            padding: 20px 30px;
+            overflow-y: auto;
+            width: 100%;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0 8px;
+        }
+
+        .history-table thead th {
+            padding: 12px 15px;
+            text-align: left;
+            color: #E65100;
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+
+        .history-table tbody tr {
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            border-radius: 8px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: default;
+        }
+
+        .history-table tbody tr:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(230, 81, 0, 0.1);
+        }
+
+        .history-table td {
+            padding: 12px 15px;
+            font-size: 0.82rem;
+            color: #444;
+            border: none;
+        }
+
+        .history-table td:first-child {
+            border-radius: 8px 0 0 8px;
+            font-weight: 600;
+            color: #E65100;
+        }
+
+        .history-table td:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .pin-btn {
+            background: linear-gradient(135deg, #E65100, #FF6D00);
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-family: 'Kanit', sans-serif;
+            transition: 0.2s;
+            white-space: nowrap;
+        }
+
+        .pin-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(230, 81, 0, 0.3);
+        }
+
+        /* FAB — Floating Action Button */
+        .fab-container {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 960;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .fab-main {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #1a1a2e, #2d2d44);
+            color: #fff;
+            font-size: 22px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            z-index: 2;
+        }
+
+        .fab-main:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+        }
+
+        .fab-main.open {
+            transform: rotate(90deg);
+            background: linear-gradient(135deg, #37474f, #455a64);
+        }
+
+        .fab-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: flex-end;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(-8px) scale(0.9);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .fab-menu.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0) scale(1);
+        }
+
+        .fab-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Kanit', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 500;
+            cursor: pointer;
+            color: #fff;
+            white-space: nowrap;
+            box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .fab-item:hover {
+            transform: translateX(-4px);
+            box-shadow: 0 5px 18px rgba(0, 0, 0, 0.5);
+        }
+
+        .fab-item.draw {
+            background: linear-gradient(135deg, #2e7d32, #43a047);
+        }
+
+        .fab-item.draw.active {
+            background: linear-gradient(135deg, #ff6f00, #ff8f00);
+            animation: drawPulse 1.5s infinite;
+        }
+
+        @keyframes drawPulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(255, 111, 0, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 0 10px rgba(255, 111, 0, 0);
+            }
+        }
+
+        .fab-item.save {
+            background: linear-gradient(135deg, #1565c0, #1e88e5);
+        }
+
+        .fab-item.del {
+            background: linear-gradient(135deg, #c62828, #e53935);
+        }
+
+        .draw-cursor {
+            cursor: crosshair !important;
+        }
+
+        .route-status {
+            position: absolute;
+            top: 84px;
+            right: 20px;
+            z-index: 950;
+            background: rgba(255, 111, 0, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            display: none;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Modern Tooltip for path hover */
+        .hover-tip {
+            background: rgba(18, 18, 18, 0.95) !important;
+            color: #fff !important;
+            border: 1px solid rgba(0, 230, 118, 0.3) !important;
+            border-radius: 10px !important;
+            padding: 8px 14px !important;
+            font-family: 'Kanit', sans-serif !important;
+            font-size: 0.78rem !important;
+            line-height: 1.5 !important;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55) !important;
+            backdrop-filter: blur(10px) !important;
+            max-width: 300px !important;
+        }
+
+        .hover-tip::before {
+            border-top-color: rgba(18, 18, 18, 0.95) !important;
+        }
+
+        /* Live Pulse Effect — CSS-animated beacon on current position */
+        .live-pulse-ring {
+            border-radius: 50%;
+            animation: livePulseExpand 1.8s ease-out infinite;
+        }
+
+        @keyframes livePulseExpand {
+            0% {
+                transform: scale(0.5);
+                opacity: 0.9;
+            }
+
+            70% {
+                opacity: 0.3;
+            }
+
+            100% {
+                transform: scale(3.5);
+                opacity: 0;
+            }
+        }
+
+        /* ETA section inside tooltip */
+        .eta-section {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .eta-section .eta-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 2px;
+            font-size: 0.75rem;
+        }
+
+        .eta-section .eta-row.actual {
+            color: #81c784;
+        }
+
+        .eta-section .eta-row.predicted {
+            color: #ffcc80;
+        }
+
+        /* Permanent floating label next to pulse marker */
+        .pulse-info-label {
+            background: rgba(12, 12, 20, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 171, 0, 0.4);
+            border-radius: 10px;
+            padding: 7px 12px;
+            font-family: 'Kanit', sans-serif;
+            font-size: 0.76rem;
+            color: #fff;
+            line-height: 1.45;
+            white-space: nowrap;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 15px rgba(255, 171, 0, 0.15);
+            animation: labelFadeIn 0.5s ease-out;
+            pointer-events: none;
+        }
+
+        .pulse-info-label .next-dest {
+            color: #ffcc80;
+            font-weight: 600;
+        }
+
+        .pulse-info-label .eta-time {
+            color: #81c784;
+            font-weight: 600;
+        }
+
+        .pulse-info-label .dir-badge {
+            display: inline-block;
+            font-size: 0.65rem;
+            padding: 1px 7px;
+            border-radius: 8px;
+            margin-bottom: 3px;
+        }
+
+        .pulse-info-label .dir-badge.forward {
+            background: rgba(0, 230, 118, 0.15);
+            color: #69f0ae;
+        }
+
+        .pulse-info-label .dir-badge.returning {
+            background: rgba(255, 214, 0, 0.15);
+            color: #ffd600;
+        }
+
+        @keyframes labelFadeIn {
+            from {
+                opacity: 0;
+                transform: translateX(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* ========== FLEET PANEL ========== */
+        .fleet-panel {
+            position: absolute;
+            top: 420px;
+            left: 20px;
+            width: 280px;
+            max-height: calc(100vh - 440px);
+            z-index: 900;
+            background: rgba(20, 20, 20, 0.88);
+            backdrop-filter: blur(12px);
+            border-radius: 14px;
+            padding: 14px;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            overflow-y: auto;
+        }
+
+        .fleet-panel::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .fleet-panel::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .fleet-panel::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+        }
+
+        .fleet-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #FFB300;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .fleet-count {
+            background: #E65100;
+            color: #fff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            font-weight: 700;
+        }
+
+        .fleet-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .fleet-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        .fleet-card.type-linen {
+            border-left: 3px solid #00C853;
+        }
+
+        .fleet-card.type-food {
+            border-left: 3px solid #FF6D00;
+        }
+
+        .fleet-card .fc-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .fleet-card .fc-name {
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+
+        .fleet-card .fc-badge {
+            font-size: 0.6rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        .fleet-card .fc-badge.available {
+            background: rgba(0, 200, 83, 0.2);
+            color: #69f0ae;
+        }
+
+        .fleet-card .fc-badge.busy {
+            background: rgba(255, 82, 82, 0.2);
+            color: #ff5252;
+        }
+
+        .fleet-card .fc-details {
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.5);
+            display: flex;
+            gap: 8px;
+        }
+
+        .fleet-card .fc-type-icon {
+            font-size: 1rem;
+        }
+
+        .fleet-card.selected {
+            border-color: #FFB300;
+            background: rgba(255, 179, 0, 0.08);
+            box-shadow: 0 0 12px rgba(255, 179, 0, 0.15);
+        }
+
+        /* Vehicle route colors */
+        .vehicle-legend {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .vehicle-legend .color-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .vehicle-legend .color-label {
+            font-size: 0.6rem;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        /* ========== CAMPUS DIGITAL TWIN VIEW ========== */
+        .campus-container {
+            flex: 1;
+            position: relative;
+            background: radial-gradient(ellipse at 30% 40%, #141428 0%, #0a0a14 100%);
+            overflow: auto;
+            padding: 20px;
+        }
+
+        .campus-layout {
+            display: flex;
+            gap: 24px;
+            height: 100%;
+            min-height: 500px;
+            align-items: stretch;
+        }
+
+        /* ── อาคาร E (12 ชั้น) ── */
+        .building-e-wrapper {
+            flex: 0 0 200px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .building-e-header {
+            text-align: center;
+            padding: 10px 0;
+            color: #FFB300;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .building-e-header .code-badge {
+            display: inline-block;
+            background: #E65100;
+            color: #fff;
+            border-radius: 6px;
+            padding: 2px 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-left: 6px;
+        }
+
+        .building-e-grid {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: rgba(20, 20, 40, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            overflow: hidden;
+            backdrop-filter: blur(8px);
+        }
+
+        .floor-cell {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            position: relative;
+            transition: background 0.3s, box-shadow 0.3s;
+            min-height: 36px;
+            gap: 8px;
+        }
+
+        .floor-cell:last-child {
+            border-bottom: none;
+        }
+
+        .floor-cell .floor-num {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.3);
+            width: 24px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .floor-cell .floor-info {
+            flex: 1;
+            font-size: 0.68rem;
+            color: rgba(255, 255, 255, 0.25);
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        /* ── อาคารอื่น (Single Block Grid) ── */
+        .other-buildings-area {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            grid-auto-rows: minmax(100px, auto);
+            gap: 14px;
+            align-content: start;
+            padding: 4px;
+        }
+
+        .campus-block {
+            background: rgba(25, 25, 45, 0.7);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            color: white;
+            transition: all 0.3s;
+            backdrop-filter: blur(6px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            position: relative;
+            min-height: 100px;
+        }
+
+        .campus-block:hover {
+            border-color: rgba(255, 179, 0, 0.4);
+            box-shadow: 0 0 16px rgba(255, 179, 0, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .campus-block .block-code {
+            position: absolute;
+            top: 6px;
+            right: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .campus-block .block-icon {
+            font-size: 1.6rem;
+        }
+
+        .campus-block .block-name {
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .campus-block .block-sub {
+            font-size: 0.58rem;
+            color: rgba(255, 255, 255, 0.35);
+        }
+
+        .campus-block .block-vehicle-info {
+            font-size: 0.62rem;
+            margin-top: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            display: none;
+        }
+
+        /* ── Blink Effects ── */
+        @keyframes blinkLinen {
+
+            0%,
+            100% {
+                background: rgba(0, 200, 83, 0.08);
+                box-shadow: none;
+            }
+
+            50% {
+                background: rgba(0, 200, 83, 0.28);
+                box-shadow: inset 0 0 20px rgba(0, 200, 83, 0.2), 0 0 12px rgba(0, 200, 83, 0.3);
+            }
+        }
+
+        @keyframes blinkFood {
+
+            0%,
+            100% {
+                background: rgba(255, 152, 0, 0.08);
+                box-shadow: none;
+            }
+
+            50% {
+                background: rgba(255, 152, 0, 0.28);
+                box-shadow: inset 0 0 20px rgba(255, 152, 0, 0.2), 0 0 12px rgba(255, 152, 0, 0.3);
+            }
+        }
+
+        .blink-linen {
+            animation: blinkLinen 1.4s ease-in-out infinite;
+            border-color: rgba(0, 200, 83, 0.5) !important;
+        }
+
+        .blink-linen .floor-num,
+        .blink-linen .block-name {
+            color: #69f0ae !important;
+        }
+
+        .blink-linen .floor-info,
+        .blink-linen .block-vehicle-info {
+            display: block !important;
+            color: #a5d6a7 !important;
+            background: rgba(0, 200, 83, 0.15);
+        }
+
+        .blink-food {
+            animation: blinkFood 1.4s ease-in-out infinite;
+            border-color: rgba(255, 152, 0, 0.5) !important;
+        }
+
+        .blink-food .floor-num,
+        .blink-food .block-name {
+            color: #ffcc80 !important;
+        }
+
+        .blink-food .floor-info,
+        .blink-food .block-vehicle-info {
+            display: block !important;
+            color: #ffe0b2 !important;
+            background: rgba(255, 152, 0, 0.15);
+        }
+
+        /* ── Campus Header ── */
+        .campus-title-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-shrink: 0;
+        }
+
+        .campus-title-bar h2 {
+            color: #FFB300;
+            font-size: 1rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .campus-legend {
+            display: flex;
+            gap: 14px;
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .campus-legend span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .legend-dot.linen {
+            background: #00C853;
+            animation: blinkLinen 1.4s ease-in-out infinite;
+        }
+
+        .legend-dot.food {
+            background: #FF9800;
+            animation: blinkFood 1.4s ease-in-out infinite;
+        }
+
+        @media (max-width: 768px) {
+            .campus-layout {
+                flex-direction: column;
+            }
+
+            .building-e-wrapper {
+                flex: 0 0 auto;
+                max-height: 350px;
+            }
+
+            .other-buildings-area {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:24px;">🏥</span>
+            <div>
+                <div style="font-weight:600; font-size: 1rem;">SUT Hospital — Asset Tracking</div>
+                <div style="font-size:0.7rem; opacity:0.8;">Sync: Google Sheets & HiveMQ</div>
+            </div>
+        </div>
+        <div class="tab-group">
+            <button class="tab-btn active" id="tabMap" onclick="switchTab('map')">🛰️ ดาวเทียม</button>
+            <button class="tab-btn" id="tabCampus" onclick="switchTab('campus')">🏫 แผนผัง</button>
+            <button class="tab-btn" id="tabHistory" onclick="switchTab('history')">🚚 ประวัติ</button>
+        </div>
+        <div class="status-online" id="connStatus">
+            <div class="dot"></div> <span id="connText">กำลังเชื่อมต่อ...</span>
+        </div>
+    </header>
+
+    <!-- TAB 1: MAP / BUILDING -->
+    <div id="viewMap" class="view-section active">
+
+        <!-- Info Panel -->
+        <div class="info-panel" id="infoPanel">
+            <div id="modeBadge" class="mode-badge mode-outdoor">🛰️ ดาวเทียม</div>
+            <div style="color:#FFB300; font-weight:600; margin-bottom:10px; font-size:0.85rem;">📍 ตำแหน่งล่าสุด</div>
+            <div id="infoName" style="font-size:1.05rem; font-weight:600; margin-bottom:4px;">รอรับข้อมูล...</div>
+            <div id="infoTime" style="font-size:0.75rem; color:#81c784; margin-bottom:10px;">—</div>
+            <hr style="border:none; border-top:1px solid rgba(255,255,255,0.06); margin:6px 0;">
+            <div style="display:flex; gap:10px; margin-bottom:8px;">
+                <div style="flex:1; background:rgba(255,179,0,0.08); padding:8px 10px; border-radius:8px;">
+                    <div style="font-size:0.6rem; color:#888; text-transform:uppercase;">🏢 ชั้น</div>
+                    <div id="infoFloor" style="font-size:1rem; font-weight:600;">—</div>
+                </div>
+                <div style="flex:1; background:rgba(255,179,0,0.08); padding:8px 10px; border-radius:8px;">
+                    <div style="font-size:0.6rem; color:#888; text-transform:uppercase;">🚪 ห้อง</div>
+                    <div id="infoRoom" style="font-size:1rem; font-weight:600;">—</div>
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:8px;">
+                <div style="flex:1;">
+                    <div style="font-size:0.6rem; color:#666;">Lat</div>
+                    <div id="infoLat" style="font-size:0.78rem;">—</div>
+                </div>
+                <div style="flex:1;">
+                    <div style="font-size:0.6rem; color:#666;">Lng</div>
+                    <div id="infoLng" style="font-size:0.78rem;">—</div>
+                </div>
+            </div>
+            <!-- Dynamic Indoor ETA Section -->
+            <div id="infoEtaSection" style="display:none;">
+                <hr class="info-section-divider">
+                <div class="info-eta-block">
+                    <div class="eta-label">⏱️ เวลาที่ใช้ในจุดนี้</div>
+                    <div class="eta-value green" id="infoTravelTime">—</div>
+                </div>
+                <div class="info-eta-block">
+                    <div class="eta-label">⏳ คาดการณ์จุดถัดไป</div>
+                    <div class="eta-value amber" id="infoPredictNext">—</div>
+                </div>
+                <div class="info-eta-block">
+                    <div class="eta-label">🕐 เวลาคาดการณ์</div>
+                    <div class="eta-value blue" id="infoPredictETA">—</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fleet Panel — Vehicle List -->
+        <div class="fleet-panel" id="fleetPanel">
+            <div class="fleet-title">🚛 ยานพาหนะ <span class="fleet-count" id="fleetCount">0</span></div>
+            <div id="fleetCards">
+                <div style="text-align:center; color:rgba(255,255,255,0.3); padding:16px; font-size:0.78rem;">⏳
+                    กำลังโหลด...</div>
+            </div>
+        </div>
+
+        <!-- Satellite Map -->
+        <div id="mapContainer">
+            <div id="map"></div>
+            <!-- Route Drawing Status -->
+            <div class="route-status" id="routeStatus">🖊️ คลิกบนแผนที่เพื่อวางจุดตามถนน</div>
+            <!-- FAB Floating Action Button -->
+            <div class="fab-container" id="fabContainer">
+                <button class="fab-main" id="fabMain" onclick="toggleFAB()">⚙️</button>
+                <div class="fab-menu" id="fabMenu">
+                    <button class="fab-item draw" id="btnDraw" onclick="toggleDrawMode()">🟢 เริ่มวาด</button>
+                    <button class="fab-item save" onclick="saveDrawnRoute()">🟦 บันทึก</button>
+                    <button class="fab-item del" onclick="deleteAllRoutes()">🟥 ลบ</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Building Indoor View -->
+        <div id="buildingContainer">
+            <div class="building-wrapper">
+                <div class="building-title">🏥 อาคารเลิศ (12 ชั้น)<small>โหมดภายในอาคาร — Indoor Tracking</small></div>
+                <div class="css-building" id="cssBuilding"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: CAMPUS DIGITAL TWIN -->
+    <div id="viewCampus" class="view-section">
+        <div class="campus-container">
+            <div class="campus-title-bar">
+                <h2>🏫 แผนผังอาคาร — Digital Twin</h2>
+                <div class="campus-legend">
+                    <span>
+                        <div class="legend-dot linen"></div> รถขนผ้า
+                    </span>
+                    <span>
+                        <div class="legend-dot food"></div> รถส่งอาหาร
+                    </span>
+                </div>
+            </div>
+            <div class="campus-layout">
+                <!-- อาคาร E (12 ชั้น) -->
+                <div class="building-e-wrapper">
+                    <div class="building-e-header">🏥 อาคารศูนย์ความเป็นเลิศฯ <span class="code-badge">E</span></div>
+                    <div class="building-e-grid" id="buildingEGrid">
+                        <!-- JS จะ render 12 ชั้นที่นี่ -->
+                    </div>
+                </div>
+                <!-- อาคารอื่นๆ -->
+                <div class="other-buildings-area" id="otherBuildingsArea">
+                    <!-- JS จะ render blocks ที่นี่ -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: HISTORY -->
+    <div id="viewHistory" class="view-section">
+        <div class="history-container">
+            <h2 style="color:#E65100; margin-bottom:14px;">🚚 ประวัติการขนส่ง <span id="historyCount"
+                    style="font-size:0.8rem; color:#999;"></span></h2>
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>เวลา</th>
+                        <th>สถานที่</th>
+                        <th>ผู้ใช้</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    <tr>
+                        <td colspan="5" style="text-align:center; color:#999; padding:40px;">⏳ กำลังโหลดข้อมูล...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // CONFIG
+        // ============================================================
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzgBQsZb3fO_d1QE-ztluNh6gwXDz72aNHNUWcZnTyrO6J1jjsI9LT7nQ7FgedA0tA/exec";
+        const MQTT_CONFIG = {
+            host: 'wss://564d6735d8a44cf2b4ecfb644522a241.s1.eu.hivemq.cloud:8884/mqtt',
+            options: {
+                username: 'hivemq.webclient.1777733424918',
+                password: 'Wf:>ygDc63MtnC58$;SH',
+                clientId: 'sut_web_' + Math.random().toString(16).slice(2, 8),
+                clean: true, reconnectPeriod: 5000, connectTimeout: 10000
+            },
+            topic: 'hospital/track'
+        };
+        const AUTO_REFRESH = 5000;
+        const MAX_ROWS = 100;
+
+        // ============================================================
+        // STATE
+        // ============================================================
+        let map, currentMarker;
+        let isFetching = false;
+        let currentMode = 'outdoor';
+        let allHistoryData = [];
+        let prevDataLen = 0;
+
+        // ── Fleet Multi-Vehicle State ──
+        let fleetVehicles = [];                // [{vehicleId, type, name, capacity, status, lastLat, lastLng, lastLocation}]
+        let vehiclePaths = {};                 // { 'V001': [{lat,lng,time,name,floor,room},...], 'V002': [...] }
+        let vehicleRouteGroups = {};           // { 'V001': L.featureGroup, ... }
+        let selectedVehicleId = null;          // คันที่เลือกดู (null = ดูทุกคัน)
+
+        // พิกัดอาคาร/สถานที่ — โหลดจาก Sheet 'Locations' (ค่าเริ่มต้นเป็น fallback)
+        let BUILDING_COORDS = {};
+        let locationsLoaded = false;  // flag ว่าโหลดจาก sheet แล้วหรือยัง
+
+        // สีเส้นทางแยกรถ (วนซ้ำถ้ารถเยอะ)
+        const VEHICLE_COLORS = [
+            '#00e676', '#ff6d00', '#448aff', '#e040fb',
+            '#ffd600', '#00bcd4', '#ff5252', '#76ff03'
+        ];
+
+        // Manual Drawing State
+        let isDrawing = false;
+        let drawPoints = [];
+        let drawPolyline = null;
+        let drawDots = [];
+
+        // Saved Route State
+        let savedRouteLine = null;
+        let savedRouteCoords = [];
+
+        // Traveled Path State — ใช้ featureGroup เพื่อลบพร้อมกัน
+        let traveledGroup = null;
+        let lastRouteIdx = -1;    // route index ของจุดสแกนก่อนหน้า
+        let peakRouteIdx = -1;    // จุดไกลสุดขาไป
+        let isReturning = false;
+
+        // Live Pulse Effect State
+        let pulseGroup = null;  // featureGroup สำหรับ pulse rings
+
+        // ETA Calculation — ค่าเฉลี่ยเวลาเดินทางระหว่างคู่จุด
+        let etaAverages = {};  // key: "fromName→toName", value: { totalMs, count, avgMs }
+
+        // ============================================================
+        // BUILD THE 12-FLOOR CSS BUILDING
+        // ============================================================
+        function initBuilding() {
+            const bld = document.getElementById('cssBuilding');
+            bld.innerHTML = '';
+            for (let f = 12; f >= 1; f--) {
+                const div = document.createElement('div');
+                div.className = 'building-floor';
+                div.dataset.floor = f;
+                div.innerHTML = '<span>' + f + '</span><div class="floor-label" id="floorLabel' + f + '"></div><div class="indoor-pulse"></div>';
+                bld.appendChild(div);
+            }
+        }
+
+        function highlightFloor(floorNum, roomName) {
+            document.querySelectorAll('.building-floor').forEach(f => {
+                f.classList.remove('active');
+                const label = f.querySelector('.floor-label');
+                if (label) label.style.display = 'none';
+            });
+            const target = document.querySelector('.building-floor[data-floor="' + floorNum + '"]');
+            if (target) {
+                target.classList.add('active');
+                const label = document.getElementById('floorLabel' + floorNum);
+                if (label) {
+                    label.textContent = '📍 ชั้น ' + floorNum + (roomName && roomName !== '-' ? ' — ' + roomName : '');
+                    label.style.display = 'block';
+                }
+            }
+        }
+
+        // ============================================================
+        // SWITCH BETWEEN MAP AND BUILDING
+        // ============================================================
+        function showMapMode() {
+            document.getElementById('mapContainer').style.display = 'block';
+            document.getElementById('buildingContainer').style.display = 'none';
+            currentMode = 'outdoor';
+            document.getElementById('modeBadge').className = 'mode-badge mode-outdoor';
+            document.getElementById('modeBadge').textContent = '🛰️ ดาวเทียม';
+            setTimeout(() => map && map.invalidateSize(), 200);
+        }
+
+        function showBuildingMode(floorNum, roomName) {
+            document.getElementById('mapContainer').style.display = 'none';
+            document.getElementById('buildingContainer').style.display = 'flex';
+            currentMode = 'indoor';
+            document.getElementById('modeBadge').className = 'mode-badge mode-indoor';
+            document.getElementById('modeBadge').textContent = '🏢 โหมดภายในอาคาร';
+            highlightFloor(floorNum, roomName);
+        }
+
+        // ============================================================
+        // INIT MAP
+        // ============================================================
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView([14.8674, 102.0371], 17);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Esri Satellite', maxZoom: 20
+            }).addTo(map);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            loadSavedRoute();
+            map.on('click', onMapClick);
+        }
+
+        // ============================================================
+        // MANUAL DRAWING MODE
+        // ============================================================
+        function onMapClick(e) {
+            if (!isDrawing) return;
+            const pt = [e.latlng.lat, e.latlng.lng];
+            drawPoints.push(pt);
+            const dot = L.circleMarker(pt, { radius: 5, color: '#00e676', fillColor: '#00e676', fillOpacity: 1, weight: 2 }).addTo(map);
+            drawDots.push(dot);
+            if (drawPolyline) map.removeLayer(drawPolyline);
+            if (drawPoints.length >= 2) {
+                drawPolyline = L.polyline(drawPoints, { color: '#00e676', weight: 5, opacity: 0.9, lineJoin: 'round' }).addTo(map);
+            }
+        }
+
+        function toggleFAB() {
+            const main = document.getElementById('fabMain');
+            const menu = document.getElementById('fabMenu');
+            main.classList.toggle('open');
+            menu.classList.toggle('open');
+        }
+
+        function toggleDrawMode() {
+            isDrawing = !isDrawing;
+            const btn = document.getElementById('btnDraw');
+            const status = document.getElementById('routeStatus');
+            const mapEl = document.getElementById('map');
+            if (isDrawing) {
+                btn.classList.add('active');
+                btn.textContent = '✏️ กำลังวาด...';
+                status.style.display = 'block';
+                mapEl.classList.add('draw-cursor');
+                drawPoints = [];
+                clearDrawLayer();
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = '🟢 เริ่มวาด';
+                status.style.display = 'none';
+                mapEl.classList.remove('draw-cursor');
+            }
+        }
+
+        function clearDrawLayer() {
+            if (drawPolyline) { map.removeLayer(drawPolyline); drawPolyline = null; }
+            drawDots.forEach(d => map.removeLayer(d));
+            drawDots = [];
+        }
+
+        // ============================================================
+        // SAVE / LOAD / DELETE ROUTE
+        // ============================================================
+        function saveDrawnRoute() {
+            if (drawPoints.length < 2) { alert('กรุณาวาดเส้นทางอย่างน้อย 2 จุดก่อน'); return; }
+            savedRouteCoords = [...drawPoints];
+            localStorage.setItem('hospital_route', JSON.stringify(savedRouteCoords));
+            if (isDrawing) toggleDrawMode();
+            clearDrawLayer();
+            loadSavedRoute();
+            clearTraveled();
+            alert('✅ บันทึกเส้นทางมาตรฐานสำเร็จ (' + savedRouteCoords.length + ' จุด)');
+        }
+
+        function loadSavedRoute() {
+            if (savedRouteLine) { map.removeLayer(savedRouteLine); savedRouteLine = null; }
+            const stored = localStorage.getItem('hospital_route');
+            if (!stored) return;
+            try {
+                savedRouteCoords = JSON.parse(stored);
+                if (savedRouteCoords.length >= 2) {
+                    savedRouteLine = L.polyline(savedRouteCoords, {
+                        color: '#aaa', weight: 4, opacity: 0.4, dashArray: '10, 8', lineJoin: 'round'
+                    }).addTo(map);
+                }
+            } catch (e) { savedRouteCoords = []; }
+        }
+
+        function deleteAllRoutes() {
+            if (!confirm('ลบเส้นทางทั้งหมด?')) return;
+            clearDrawLayer();
+            clearTraveled();
+            savedRouteCoords = [];
+            drawPoints = [];
+            localStorage.removeItem('hospital_route');
+            if (savedRouteLine) { map.removeLayer(savedRouteLine); savedRouteLine = null; }
+            if (isDrawing) toggleDrawMode();
+        }
+
+        // ============================================================
+        // TRAVELED ROUTE — featureGroup (เส้น+marker+label ลบพร้อมกัน)
+        // ============================================================
+        function clearTraveled() {
+            if (traveledGroup) { traveledGroup.clearLayers(); map.removeLayer(traveledGroup); traveledGroup = null; }
+            lastRouteIdx = -1;
+            peakRouteIdx = -1;
+            isReturning = false;
+        }
+
+        function findClosestRouteIndex(pos) {
+            let best = -1, bestDist = Infinity;
+            savedRouteCoords.forEach((pt, i) => {
+                const d = Math.pow(pt[0] - pos[0], 2) + Math.pow(pt[1] - pos[1], 2);
+                if (d < bestDist) { bestDist = d; best = i; }
+            });
+            return best;
+        }
+
+        function updateTraveledRoute(data) {
+            if (traveledGroup) { traveledGroup.clearLayers(); map.removeLayer(traveledGroup); }
+            traveledGroup = L.featureGroup().addTo(map);
+
+            if (savedRouteCoords.length < 2) return;
+
+            // กรอง outdoor + หา route index
+            const pts = [];
+            data.forEach(d => {
+                const lat = parseFloat(d.lat), lng = parseFloat(d.lng);
+                if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
+                const pos = [lat, lng];
+                const rIdx = findClosestRouteIndex(pos);
+                pts.push({ ...d, pos, rIdx });
+            });
+            if (pts.length < 2) {
+                // มีจุดเดียว → วาง marker อย่างเดียว
+                if (pts.length === 1) {
+                    L.circleMarker(pts[0].pos, {
+                        radius: 9, color: '#ffab00', fillColor: '#ffab00', fillOpacity: 1, weight: 3
+                    }).bindTooltip('📍 ' + (pts[0].name || 'ปัจจุบัน'), {
+                        permanent: false, direction: 'top', className: 'hover-tip'
+                    }).addTo(traveledGroup);
+                }
+                return;
+            }
+
+            // หาจุดเปลี่ยนทิศทางสุดท้าย (scan จากท้ายมาหน้า)
+            // เทียบ 2 จุดสุดท้ายเพื่อหาทิศทางปัจจุบัน
+            const lastIdx = pts[pts.length - 1].rIdx;
+            const prevIdx = pts[pts.length - 2].rIdx;
+            const currentlyReturning = lastIdx < prevIdx;
+
+            // ไล่ย้อนกลับหาจุดที่ทิศทางเปลี่ยน → เริ่มวาดจากจุดนั้น
+            let phaseStart = pts.length - 2; // อย่างน้อยเริ่มที่จุดก่อนสุดท้าย
+            for (let i = pts.length - 2; i >= 1; i--) {
+                const segReturn = pts[i].rIdx < pts[i - 1].rIdx;
+                if (segReturn !== currentlyReturning) break; // ทิศทางเปลี่ยน → หยุด
+                phaseStart = i - 1;
+            }
+
+            // ตัดเอาเฉพาะจุดในเฟสปัจจุบัน
+            const activePts = pts.slice(phaseStart);
+
+            const pathColor = currentlyReturning ? '#ffd600' : '#00e676';
+            const markerColor = currentlyReturning ? '#ff6d00' : '#ffab00';
+            const dirLabel = currentlyReturning ? '🔙 ขากลับ' : '📍 ขาไป';
+
+            // วาดเส้นตาม saved route สำหรับแต่ละ segment ในเฟสปัจจุบัน
+            for (let i = 1; i < activePts.length; i++) {
+                const from = activePts[i - 1];
+                const to = activePts[i];
+                const fromIdx = from.rIdx;
+                const toIdx = to.rIdx;
+
+                let routeSlice;
+                if (toIdx >= fromIdx) {
+                    routeSlice = savedRouteCoords.slice(fromIdx, toIdx + 1).map(c => [...c]);
+                } else {
+                    routeSlice = savedRouteCoords.slice(toIdx, fromIdx + 1).reverse().map(c => [...c]);
+                }
+                if (routeSlice.length > 0) {
+                    routeSlice[0] = from.pos;
+                    routeSlice[routeSlice.length - 1] = to.pos;
+                } else {
+                    routeSlice = [from.pos, to.pos];
+                }
+
+                // Calculate actual travel time for this segment
+                const t1 = parseTime(from.time), t2 = parseTime(to.time);
+                let segDiffMs = null;
+                if (t1 && t2) {
+                    segDiffMs = Math.abs(t2.getTime() - t1.getTime());
+                    if (segDiffMs <= 0) segDiffMs = null;
+                }
+
+                if (routeSlice.length >= 2) {
+                    L.polyline(routeSlice, {
+                        color: pathColor, weight: 6, opacity: 0.85, lineJoin: 'round'
+                    }).addTo(traveledGroup);
+                }
+
+                // Tooltip hitbox with ETA
+                let tip = '<div style="text-align:left;">';
+                tip += '<div style="color:' + pathColor + ';font-weight:600;margin-bottom:3px;">' + dirLabel + '</div>';
+                tip += '<b>' + (from.name || 'จุดต้นทาง') + '</b> → <b>' + (to.name || 'จุดปลายทาง') + '</b>';
+                if (to.floor && to.floor !== '-') tip += '<br>🏢 ชั้น ' + to.floor;
+                if (to.room && to.room !== '-') tip += ' / ห้อง ' + to.room;
+                if (segDiffMs) tip += '<br>⏱ เวลา: <b>' + formatDuration(segDiffMs) + '</b>';
+                // Add ETA section
+                tip += buildETATooltipHtml(from.name, to.name, segDiffMs);
+                tip += '</div>';
+
+                L.polyline([from.pos, to.pos], {
+                    color: pathColor, weight: 18, opacity: 0
+                }).bindTooltip(tip, {
+                    sticky: true, direction: 'top', className: 'hover-tip'
+                }).addTo(traveledGroup);
+            }
+
+            // Markers เฉพาะจุดในเฟสปัจจุบัน
+            activePts.forEach((pt, i) => {
+                const isLast = (i === activePts.length - 1);
+                let tipHtml = '<b>' + (pt.name || 'จุด ' + (i + 1)) + '</b>';
+                if (pt.floor && pt.floor !== '-') tipHtml += '<br>ชั้น: ' + pt.floor;
+                if (pt.room && pt.room !== '-') tipHtml += ' / ห้อง: ' + pt.room;
+                tipHtml += '<br>🕒 ' + (pt.time || '-');
+
+                // Actual time from previous point
+                let actualDiffMs = null;
+                if (i > 0) {
+                    const prevPt = activePts[i - 1];
+                    const t1 = parseTime(prevPt.time), t2 = parseTime(pt.time);
+                    if (t1 && t2) {
+                        const diff = Math.abs(t2.getTime() - t1.getTime());
+                        if (diff > 0) {
+                            tipHtml += '<br>⏱ จาก ' + (prevPt.name || 'จุดก่อนหน้า') + ': ' + formatDuration(diff);
+                            actualDiffMs = diff;
+                        }
+                    }
+                }
+
+                // ETA for the latest marker (predict next destination)
+                if (isLast && pt.name && pt.name !== '-') {
+                    const nextName = getNextLocationName(pt.name, allHistoryData, currentlyReturning);
+                    if (nextName) {
+                        const eta = getETABetween(pt.name, nextName);
+                        tipHtml += '<div class="eta-section">';
+                        if (actualDiffMs) {
+                            tipHtml += '<div class="eta-row actual">⏱️ เวลาที่ใช้จริง: <b>' + formatDuration(actualDiffMs) + '</b></div>';
+                        }
+                        if (eta) {
+                            tipHtml += '<div class="eta-row predicted">⏳ คาดการณ์จุดถัดไป (' + nextName + '): ~<b>' + formatDuration(eta.avgMs) + '</b>';
+                            tipHtml += ' <span style="opacity:0.6">(' + eta.count + ' ครั้ง)</span></div>';
+                        } else {
+                            tipHtml += '<div class="eta-row predicted">⏳ คาดการณ์จุดถัดไป (' + nextName + '): ~<b>5 น.</b> <span style="opacity:0.6">(ค่าเริ่มต้น)</span></div>';
+                        }
+                        tipHtml += '</div>';
+                    } else {
+                        tipHtml += '<div class="eta-section">';
+                        tipHtml += '<div class="eta-row predicted">⏳ จุดถัดไป: <b>กำลังคำนวณ...</b></div>';
+                        tipHtml += '</div>';
+                    }
+                }
+
+                L.circleMarker(pt.pos, {
+                    radius: isLast ? 9 : 5,
+                    color: isLast ? markerColor : '#fff',
+                    fillColor: isLast ? markerColor : pathColor,
+                    fillOpacity: isLast ? 1 : 0.9,
+                    weight: isLast ? 3 : 2
+                }).bindTooltip((isLast ? dirLabel + ' ' : '') + tipHtml, {
+                    permanent: false, direction: 'top', className: 'hover-tip'
+                }).addTo(traveledGroup);
+
+                // Live Pulse Effect on the LAST (current) marker
+                if (isLast) {
+                    updatePulseEffect(pt.pos);
+                }
+            });
+        }
+
+        function parseTime(str) {
+            if (!str || str === '-') return null;
+            const d = new Date(str);
+            if (!isNaN(d.getTime())) return d;
+            const parts = str.match(/(\d+)[:/-](\d+)[:/-]?(\d*)/);
+            if (parts) {
+                const now = new Date();
+                now.setHours(parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3] || 0));
+                return now;
+            }
+            return null;
+        }
+
+        function formatDuration(ms) {
+            const sec = Math.floor(ms / 1000);
+            if (sec < 60) return sec + ' วิ';
+            const min = Math.floor(sec / 60);
+            const remSec = sec % 60;
+            if (min >= 60) return Math.floor(min / 60) + ' ชม. ' + (min % 60) + ' น.';
+            return min + ' น.' + (remSec > 0 ? ' ' + remSec + ' วิ' : '');
+        }
+
+        // ============================================================
+        // ETA CALCULATION ENGINE
+        // ============================================================
+        function buildETAAverages(data) {
+            etaAverages = {};
+            for (let i = 1; i < data.length; i++) {
+                const from = data[i - 1];
+                const to = data[i];
+                if (!from.name || !to.name || from.name === '-' || to.name === '-') continue;
+                if (from.name === to.name) continue; // skip same location
+                const t1 = parseTime(from.time), t2 = parseTime(to.time);
+                if (!t1 || !t2) continue;
+                const diff = Math.abs(t2.getTime() - t1.getTime());
+                if (diff <= 0 || diff > 3600000) continue; // skip invalid or > 1hr
+
+                const key = from.name + '→' + to.name;
+                if (!etaAverages[key]) {
+                    etaAverages[key] = { totalMs: 0, count: 0, avgMs: 0 };
+                }
+                etaAverages[key].totalMs += diff;
+                etaAverages[key].count++;
+                etaAverages[key].avgMs = etaAverages[key].totalMs / etaAverages[key].count;
+            }
+        }
+
+        function getETABetween(fromName, toName) {
+            const key = fromName + '→' + toName;
+            if (etaAverages[key] && etaAverages[key].count > 0) {
+                return { avgMs: etaAverages[key].avgMs, count: etaAverages[key].count };
+            }
+            // Try reverse direction
+            const revKey = toName + '→' + fromName;
+            if (etaAverages[revKey] && etaAverages[revKey].count > 0) {
+                return { avgMs: etaAverages[revKey].avgMs, count: etaAverages[revKey].count };
+            }
+            return null; // no history
+        }
+
+        function getNextLocationName(currentName, data, isRet) {
+            // หา location ถัดไปที่เป็นไปได้ จากรูปแบบเส้นทางที่เคยเดิน
+            // ใช้ข้อมูลจาก savedRouteCoords + history
+            if (!currentName || currentName === '-') return null;
+
+            // หา pattern จากประวัติ: เมื่ออยู่ที่ currentName แล้วไปไหนต่อ
+            const nextCandidates = {};
+            for (let i = 0; i < data.length - 1; i++) {
+                if (data[i].name === currentName && data[i + 1].name !== currentName) {
+                    const nextName = data[i + 1].name;
+                    nextCandidates[nextName] = (nextCandidates[nextName] || 0) + 1;
+                }
+            }
+
+            // Return most frequent next location
+            let best = null, bestCount = 0;
+            for (const [name, count] of Object.entries(nextCandidates)) {
+                if (count > bestCount) { bestCount = count; best = name; }
+            }
+            return best;
+        }
+
+        function buildETATooltipHtml(fromName, toName, actualDiffMs) {
+            let html = '<div class="eta-section">';
+
+            // Actual time
+            if (actualDiffMs !== null && actualDiffMs > 0) {
+                html += '<div class="eta-row actual">⏱️ เวลาที่ใช้จริง: <b>' + formatDuration(actualDiffMs) + '</b></div>';
+            }
+
+            // Predicted ETA for next point
+            if (fromName && toName && fromName !== '-' && toName !== '-') {
+                const eta = getETABetween(fromName, toName);
+                if (eta) {
+                    html += '<div class="eta-row predicted">⏳ คาดการณ์: ~<b>' + formatDuration(eta.avgMs) + '</b>';
+                    html += ' <span style="opacity:0.6">(จาก ' + eta.count + ' ครั้ง)</span></div>';
+                } else {
+                    html += '<div class="eta-row predicted">⏳ คาดการณ์: ~<b>5 น.</b> <span style="opacity:0.6">(ค่าเริ่มต้น)</span></div>';
+                }
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // ============================================================
+        // LIVE PULSE EFFECT
+        // ============================================================
+        function updatePulseEffect(latLng) {
+            // Remove old pulse
+            if (pulseGroup) {
+                pulseGroup.clearLayers();
+                map.removeLayer(pulseGroup);
+            }
+            pulseGroup = L.featureGroup().addTo(map);
+
+            // Create multiple concentric pulse rings for rich effect
+            const ringConfigs = [
+                { delay: '0s', size: 30, color: '#ffab00', opacity: 0.6 },
+                { delay: '0.6s', size: 30, color: '#ff6d00', opacity: 0.4 },
+                { delay: '1.2s', size: 30, color: '#ffab00', opacity: 0.3 }
+            ];
+
+            ringConfigs.forEach(cfg => {
+                const icon = L.divIcon({
+                    className: '',
+                    html: '<div class="live-pulse-ring" style="' +
+                        'width:' + cfg.size + 'px;' +
+                        'height:' + cfg.size + 'px;' +
+                        'background: radial-gradient(circle, ' + cfg.color + ' 0%, transparent 70%);' +
+                        'opacity:' + cfg.opacity + ';' +
+                        'animation-delay:' + cfg.delay + ';' +
+                        '"></div>',
+                    iconSize: [cfg.size, cfg.size],
+                    iconAnchor: [cfg.size / 2, cfg.size / 2]
+                });
+                L.marker(latLng, { icon, interactive: false, zIndexOffset: -100 }).addTo(pulseGroup);
+            });
+
+            // Add a center bright dot
+            const centerIcon = L.divIcon({
+                className: '',
+                html: '<div style="' +
+                    'width:12px;height:12px;' +
+                    'background:radial-gradient(circle, #fff 30%, #ffab00 100%);' +
+                    'border-radius:50%;' +
+                    'box-shadow: 0 0 12px #ffab00, 0 0 24px rgba(255,171,0,0.5);' +
+                    '"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+            L.marker(latLng, { icon: centerIcon, interactive: false, zIndexOffset: -50 }).addTo(pulseGroup);
+        }
+
+        function removePulseEffect() {
+            if (pulseGroup) {
+                pulseGroup.clearLayers();
+                map.removeLayer(pulseGroup);
+                pulseGroup = null;
+            }
+        }
+
+        // ============================================================
+        // TAB SWITCH
+        // ============================================================
+        function switchTab(view) {
+            document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+            document.getElementById('tabMap').classList.toggle('active', view === 'map');
+            document.getElementById('tabCampus').classList.toggle('active', view === 'campus');
+            document.getElementById('tabHistory').classList.toggle('active', view === 'history');
+            if (view === 'map') {
+                document.getElementById('viewMap').classList.add('active');
+                setTimeout(() => map && map.invalidateSize(), 200);
+            } else if (view === 'campus') {
+                document.getElementById('viewCampus').classList.add('active');
+                setTimeout(() => updateCampusView(), 200);
+            } else {
+                document.getElementById('viewHistory').classList.add('active');
+            }
+        }
+
+        // ============================================================
+        // MQTT
+        // ============================================================
+        function initMQTT() {
+            try {
+                const client = mqtt.connect(MQTT_CONFIG.host, MQTT_CONFIG.options);
+                client.on('connect', () => {
+                    client.subscribe(MQTT_CONFIG.topic);
+                    document.getElementById('connText').textContent = 'เชื่อมต่อแล้ว';
+                });
+                client.on('message', (topic, payload) => {
+                    try {
+                        const raw = JSON.parse(payload.toString());
+                        const data = normalizeData(raw);
+                        updateUI(data);
+                    } catch (e) { console.error("MQTT Parse Error", e); }
+                });
+                client.on('error', () => { document.getElementById('connText').textContent = 'ขาดการเชื่อมต่อ'; });
+                client.on('reconnect', () => { document.getElementById('connText').textContent = 'กำลังเชื่อมต่อ...'; });
+            } catch (e) { console.error('MQTT Init Failed:', e); }
+        }
+
+        // ============================================================
+        // NORMALIZE DATA (flexible key mapping)
+        // ============================================================
+        function safeName(val) {
+            // Prevent names like '7-11' from being parsed as dates
+            // Always return the original string value
+            if (val === null || val === undefined) return '-';
+            return String(val);
+        }
+
+        function normalizeData(row) {
+            if (Array.isArray(row)) {
+                return {
+                    time: row[0] || '-', name: safeName(row[1]),
+                    lat: row[2] || 0, lng: row[3] || 0,
+                    user: safeName(row[4]) || 'Station-Pi',
+                    floor: safeName(row[5]) || '-',
+                    room: safeName(row[6]) || '-'
+                };
+            }
+            return {
+                time: row.time || row.timestamp || row.Timestamp || '-',
+                name: safeName(row.name || row.location || row.Name),
+                lat: row.lat || row.latitude || row.Lat || 0,
+                lng: row.lng || row.longitude || row.Lng || 0,
+                user: safeName(row.user || row.User) || 'Station-Pi',
+                floor: safeName(row.floor || row.Floor || row.f) || '-',
+                room: safeName(row.room || row.Room || row.r) || '-'
+            };
+        }
+
+        // ============================================================
+        // FETCH HISTORY FROM GOOGLE SHEETS
+        // ============================================================
+        async function fetchHistory() {
+            if (isFetching) return;
+            isFetching = true;
+            try {
+                const response = await fetch(SCRIPT_URL);
+                const raw = await response.json();
+                if (!raw || raw.length === 0) {
+                    // No data from server — try restoring from localStorage
+                    if (allHistoryData.length === 0) {
+                        const savedState = loadIndoorState();
+                        if (savedState) {
+                            updateUI(savedState);
+                        }
+                    }
+                    isFetching = false;
+                    return;
+                }
+                allHistoryData = raw.map(normalizeData).slice(-MAX_ROWS);
+                renderHistory(allHistoryData);
+
+                // Build ETA averages from history (must happen before updateUI)
+                buildETAAverages(allHistoryData);
+
+                const latest = allHistoryData[allHistoryData.length - 1];
+                if (latest) updateUI(latest);
+
+                // อัปเดตเส้นเขียวไล่ตาม saved route
+                if (allHistoryData.length > prevDataLen) {
+                    updateTraveledRoute(allHistoryData);
+                    prevDataLen = allHistoryData.length;
+                }
+            } catch (e) {
+                console.error("Sheets Sync Error:", e);
+                // On error, try restoring from localStorage
+                if (allHistoryData.length === 0) {
+                    const savedState = loadIndoorState();
+                    if (savedState) {
+                        updateUI(savedState);
+                    }
+                }
+            }
+            isFetching = false;
+        }
+
+        // ============================================================
+        // UPDATE UI — Panel + Map/Building auto-switch
+        // ============================================================
+        function isIndoor(data) {
+            const lat = parseFloat(data.lat);
+            const lng = parseFloat(data.lng);
+            const noCoords = isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0);
+            const nameStr = String(data.name || '');
+            const isLert = nameStr.includes('เลิศ') || nameStr.includes('ตึก 12 ชั้น');
+            return noCoords || isLert;
+        }
+
+        // ============================================================
+        // INDOOR PREDICTION ENGINE
+        // ============================================================
+        function getIndoorPrediction(currentName, currentFloor, currentRoom) {
+            // Find the last time the cart was at this same location in history
+            // Then see where it went next → that's our prediction
+            const result = { nextName: null, nextFloor: null, nextRoom: null, etaMs: null };
+            if (!allHistoryData || allHistoryData.length < 2) return result;
+
+            const currKey = String(currentName || '') + '|' + String(currentFloor || '') + '|' + String(currentRoom || '');
+
+            // Search history backwards (most recent first) for the same location
+            for (let i = allHistoryData.length - 2; i >= 0; i--) {
+                const h = allHistoryData[i];
+                const hKey = String(h.name || '') + '|' + String(h.floor || '') + '|' + String(h.room || '');
+
+                if (hKey === currKey && i + 1 < allHistoryData.length) {
+                    const next = allHistoryData[i + 1];
+                    // Make sure the next point is different
+                    const nextKey = String(next.name || '') + '|' + String(next.floor || '') + '|' + String(next.room || '');
+                    if (nextKey !== currKey) {
+                        result.nextName = next.name;
+                        result.nextFloor = next.floor;
+                        result.nextRoom = next.room;
+
+                        // Calculate ETA from historical average between these two locations
+                        const eta = getETABetween(currentName, next.name);
+                        if (eta) {
+                            result.etaMs = eta.avgMs;
+                        } else {
+                            // Fallback: use the actual time between these two specific points
+                            const t1 = parseTime(h.time), t2 = parseTime(next.time);
+                            if (t1 && t2) {
+                                const diff = Math.abs(t2.getTime() - t1.getTime());
+                                if (diff > 0 && diff < 3600000) result.etaMs = diff;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            return result;
+        }
+
+        function getIndoorTravelTime(currentData) {
+            // Calculate time spent traveling from previous scan point to this one
+            if (!allHistoryData || allHistoryData.length < 2) return null;
+            const lastIdx = allHistoryData.length - 1;
+            const current = allHistoryData[lastIdx];
+            const prev = allHistoryData[lastIdx - 1];
+
+            // Make sure we're comparing the right data point
+            if (current.name !== currentData.name) return null;
+
+            const t1 = parseTime(prev.time), t2 = parseTime(current.time);
+            if (!t1 || !t2) return null;
+            const diff = Math.abs(t2.getTime() - t1.getTime());
+            if (diff <= 0 || diff > 3600000) return null;
+            return { diffMs: diff, fromName: prev.name, fromFloor: prev.floor, fromRoom: prev.room };
+        }
+
+        // ============================================================
+        // LOCALSTORAGE PERSISTENCE (Memory)
+        // ============================================================
+        const STORAGE_KEY_INDOOR = 'linen_last_indoor_state';
+
+        function saveIndoorState(data) {
+            const state = {
+                name: data.name, floor: data.floor, room: data.room,
+                time: data.time, lat: data.lat, lng: data.lng,
+                user: data.user, savedAt: Date.now()
+            };
+            localStorage.setItem(STORAGE_KEY_INDOOR, JSON.stringify(state));
+        }
+
+        function loadIndoorState() {
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY_INDOOR);
+                if (!stored) return null;
+                const state = JSON.parse(stored);
+                // Only use if saved within last 24 hours
+                if (Date.now() - state.savedAt > 86400000) return null;
+                return state;
+            } catch { return null; }
+        }
+
+        function clearIndoorState() {
+            localStorage.removeItem(STORAGE_KEY_INDOOR);
+        }
+
+        // ============================================================
+        // UPDATE INFO PANEL — ETA Section
+        // ============================================================
+        function updateInfoPanelETA(data) {
+            const etaSection = document.getElementById('infoEtaSection');
+            const travelTimeEl = document.getElementById('infoTravelTime');
+            const predictNextEl = document.getElementById('infoPredictNext');
+            const predictETAEl = document.getElementById('infoPredictETA');
+
+            // Travel time from previous point
+            const travel = getIndoorTravelTime(data);
+            if (travel) {
+                travelTimeEl.textContent = formatDuration(travel.diffMs) + ' (จาก ' + (travel.fromName || 'จุดก่อนหน้า') + ')';
+            } else {
+                travelTimeEl.textContent = '—';
+            }
+
+            // Predicted next destination
+            const prediction = getIndoorPrediction(data.name, data.floor, data.room);
+            if (prediction.nextName) {
+                let predText = prediction.nextName;
+                if (prediction.nextFloor && prediction.nextFloor !== '-') {
+                    predText += ' (ชั้น ' + prediction.nextFloor;
+                    if (prediction.nextRoom && prediction.nextRoom !== '-') {
+                        predText += ' / ' + prediction.nextRoom;
+                    }
+                    predText += ')';
+                }
+                predictNextEl.textContent = predText;
+
+                // Predicted ETA
+                if (prediction.etaMs) {
+                    predictETAEl.textContent = '~' + formatDuration(prediction.etaMs);
+                } else {
+                    predictETAEl.textContent = '~5 น. (ค่าเริ่มต้น)';
+                }
+            } else {
+                predictNextEl.textContent = 'กำลังเรียนรู้รูปแบบ...';
+                predictETAEl.textContent = '—';
+            }
+
+            // Show the section
+            etaSection.style.display = 'block';
+        }
+
+        function hideInfoPanelETA() {
+            const etaSection = document.getElementById('infoEtaSection');
+            if (etaSection) etaSection.style.display = 'none';
+        }
+
+        function updateUI(data) {
+            const lat = parseFloat(data.lat);
+            const lng = parseFloat(data.lng);
+            const floorNum = parseInt(data.floor) || 0;
+
+            // Always update Info Panel — use safeName to ensure '7-11' stays as text
+            document.getElementById('infoName').textContent = safeName(data.name) || 'ไม่ระบุชื่อ';
+            document.getElementById('infoTime').textContent = '🕒 ' + (data.time || '-');
+            document.getElementById('infoFloor').textContent = safeName(data.floor) || '-';
+            document.getElementById('infoRoom').textContent = safeName(data.room) || '-';
+            document.getElementById('infoLat').textContent = (!isNaN(lat) && lat !== 0) ? lat.toFixed(6) : '0.00';
+            document.getElementById('infoLng').textContent = (!isNaN(lng) && lng !== 0) ? lng.toFixed(6) : '0.00';
+
+            if (isIndoor(data)) {
+                // INDOOR MODE: show building, remove pulse from map
+                showBuildingMode(floorNum, data.room);
+                removePulseEffect();
+
+                // Save indoor state for persistence
+                saveIndoorState(data);
+
+                // Update ETA section in info panel
+                updateInfoPanelETA(data);
+            } else {
+                // OUTDOOR MODE: show map + marker
+                showMapMode();
+                clearIndoorState();
+                hideInfoPanelETA();
+
+                const pos = [lat, lng];
+                if (currentMarker) { map.removeLayer(currentMarker); }
+                currentMarker = L.marker(pos).addTo(map);
+                map.flyTo(pos, 19);
+
+                // Move pulse effect to new position immediately
+                updatePulseEffect(pos);
+            }
+        }
+
+        // ============================================================
+        // VIEW ON MAP / BUILDING (called from pin button)
+        // ============================================================
+        function viewOnMap(idx) {
+            const item = allHistoryData[idx];
+            if (!item) return;
+            switchTab('map');
+            setTimeout(() => updateUI(item), 300);
+        }
+
+        // ============================================================
+        // RENDER HISTORY TABLE
+        // ============================================================
+        function renderHistory(data) {
+            const body = document.getElementById('historyBody');
+            const countEl = document.getElementById('historyCount');
+            if (!data || data.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999; padding:40px;">📋 ยังไม่มีข้อมูล</td></tr>';
+                if (countEl) countEl.textContent = '';
+                return;
+            }
+
+            const sorted = [...data].reverse();
+            if (countEl) countEl.textContent = '(' + data.length + ' รายการ)';
+
+            body.innerHTML = sorted.map((item, idx) => {
+                const realIdx = data.length - 1 - idx; // index in allHistoryData
+                return '<tr>' +
+                    '<td>' + (idx + 1) + '</td>' +
+                    '<td style="font-size:0.78rem; color:#888;">' + (item.time || '-') + '</td>' +
+                    '<td><b>' + (item.name || '-') + '</b><br><span style="font-size:0.72rem; color:#999;">ชั้น ' + (item.floor || '-') + ' / ห้อง ' + (item.room || '-') + '</span></td>' +
+                    '<td style="font-size:0.78rem; color:#1565C0;">' + (item.user || '-') + '</td>' +
+                    '<td><button class="pin-btn" onclick="viewOnMap(' + realIdx + ')">📍 ดูตำแหน่ง</button></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        // ============================================================
+        // FLEET MANAGEMENT — Multi-Vehicle Tracking
+        // ============================================================
+
+        /**
+         * ดึงข้อมูลรถจาก Backend (getVehicles) หรือ SCRIPT_URL
+         */
+        async function loadFleet() {
+            try {
+                let vehicles = [];
+
+                // ลอง google.script.run ก่อน
+                if (typeof google !== 'undefined' && google.script) {
+                    vehicles = await new Promise((resolve, reject) => {
+                        google.script.run
+                            .withSuccessHandler(resolve)
+                            .withFailureHandler(e => reject(e))
+                            .getVehicles();
+                    });
+                } else {
+                    // ลอง fetch ผ่าน SCRIPT_URL
+                    try {
+                        const resp = await fetch(SCRIPT_URL + '&action=getVehicles');
+                        if (resp.ok) {
+                            const json = await resp.json();
+                            if (Array.isArray(json)) vehicles = json;
+                        }
+                    } catch (e) {
+                        // Fallback: ใช้ข้อมูลจาก DataLog column "ผู้บันทึก"
+                        console.log('ℹ️ ใช้ข้อมูลรถจาก DataLog');
+                    }
+                }
+
+                // ถ้าไม่ได้ข้อมูลจาก Backend → สร้างจาก DataLog
+                if (!vehicles.length && allHistoryData.length > 0) {
+                    const uniqueUsers = {};
+                    allHistoryData.forEach(d => {
+                        const user = (d.user || '').trim();
+                        if (user && !uniqueUsers[user]) {
+                            const isLinen = user.includes('ผ้า');
+                            uniqueUsers[user] = {
+                                vehicleId: user.replace(/\s/g, ''),
+                                name: user,
+                                type: isLinen ? 'รถขนผ้า' : 'รถส่งอาหาร',
+                                capacity: 100,
+                                status: 'ว่าง'
+                            };
+                        }
+                    });
+                    vehicles = Object.values(uniqueUsers);
+                }
+
+                fleetVehicles = vehicles;
+                renderFleetCards();
+                buildVehiclePaths();
+                renderVehicleRoutes();
+            } catch (e) {
+                console.error('❌ loadFleet error:', e);
+            }
+        }
+
+        /**
+         * สร้าง Card UI สำหรับรถแต่ละคัน
+         */
+        function renderFleetCards() {
+            const container = document.getElementById('fleetCards');
+            const countEl = document.getElementById('fleetCount');
+            countEl.textContent = fleetVehicles.length;
+
+            if (!fleetVehicles.length) {
+                container.innerHTML = '<div style="text-align:center; color:rgba(255,255,255,0.3); padding:16px; font-size:0.78rem;">ไม่พบยานพาหนะ</div>';
+                return;
+            }
+
+            container.innerHTML = fleetVehicles.map((v, idx) => {
+                const isLinen = (v.type || '').includes('ผ้า');
+                const typeCls = isLinen ? 'type-linen' : 'type-food';
+                const icon = isLinen ? '🧺' : '🍱';
+                const jobSt = getVehicleJobStatus(v.vehicleId);
+                const stColors = { going: '#00e676', returning: '#ffd600', available: 'rgba(255,255,255,0.3)' };
+                const stLabels = { going: '🟢 ขาไป', returning: '🟡 ขากลับ', available: '⚪ ว่าง' };
+                const stCls = jobSt === 'available' ? 'available' : 'busy';
+                const stText = stLabels[jobSt] || 'ว่าง';
+                const color = jobSt === 'going' ? '#00e676' : jobSt === 'returning' ? '#ffd600' : VEHICLE_COLORS[idx % VEHICLE_COLORS.length];
+                const selCls = selectedVehicleId === v.vehicleId ? 'selected' : '';
+                const lastLoc = v.lastLocation || '';
+
+                return '<div class="fleet-card ' + typeCls + ' ' + selCls + '" onclick="selectVehicle(\'' + v.vehicleId + '\')">' +
+                    '<div class="fc-header">' +
+                    '<span class="fc-name">' + icon + ' ' + (v.name || v.vehicleId) + '</span>' +
+                    '<span class="fc-badge ' + stCls + '" style="background:' + stColors[jobSt] + '22;color:' + stColors[jobSt] + '">' + stText + '</span>' +
+                    '</div>' +
+                    '<div class="fc-details">' +
+                    '<span>ID: ' + v.vehicleId + '</span>' +
+                    '<span>ความจุ: ' + (v.capacity || '-') + '</span>' +
+                    '</div>' +
+                    (lastLoc ? '<div style="font-size:0.65rem;color:rgba(255,255,255,0.4);margin-top:2px">📍 ' + lastLoc + '</div>' : '') +
+                    '<div class="vehicle-legend">' +
+                    '<span class="color-dot" style="background:' + color + '"></span>' +
+                    '<span class="color-label">เส้นทาง</span>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        /**
+         * เลือก/ยกเลิกเลือกรถเพื่อโฟกัสเส้นทาง
+         */
+        function selectVehicle(vid) {
+            selectedVehicleId = (selectedVehicleId === vid) ? null : vid;
+            renderFleetCards();
+            renderVehicleRoutes();
+        }
+
+        /**
+         * แปลงชื่อสถานที่เป็นพิกัด Lat/Lng (ดูจาก BUILDING_COORDS → locationMap → partial match)
+         */
+        function getCoordForLocation(name) {
+            if (!name || name === '-') return null;
+
+            // 1. เช็ค BUILDING_COORDS (โหลดจาก Sheet Locations)
+            if (BUILDING_COORDS[name]) return BUILDING_COORDS[name];
+
+            // 2. เช็ค locationMap (มี lat/lng ถ้าโหลดแล้ว)
+            if (locationMap[name] && locationMap[name].lat) {
+                return { lat: locationMap[name].lat, lng: locationMap[name].lng };
+            }
+
+            // 3. Partial match ใน BUILDING_COORDS
+            for (const [key, coord] of Object.entries(BUILDING_COORDS)) {
+                if (name.includes(key) || key.includes(name)) return coord;
+            }
+
+            // 4. Partial match ใน locationMap
+            for (const [key, loc] of Object.entries(locationMap)) {
+                if ((name.includes(key) || key.includes(name)) && loc.lat) {
+                    return { lat: loc.lat, lng: loc.lng };
+                }
+            }
+
+            return null;
+        }
+
+        /**
+         * แยกข้อมูล DataLog เป็น vehiclePaths ตาม user/vehicle
+         */
+        function buildVehiclePaths() {
+            vehiclePaths = {};
+
+            allHistoryData.forEach(d => {
+                const user = (d.user || '').trim();
+                if (!user) return;
+
+                // หา vehicleId ที่ตรงกับ user
+                let vid = user.replace(/\s/g, '');
+                const matchedVehicle = fleetVehicles.find(v =>
+                    v.name === user || v.vehicleId === user || v.vehicleId === vid
+                );
+                if (matchedVehicle) vid = matchedVehicle.vehicleId;
+
+                if (!vehiclePaths[vid]) vehiclePaths[vid] = [];
+
+                const lat = parseFloat(d.lat);
+                const lng = parseFloat(d.lng);
+
+                // ถ้าพิกัด = 0 (indoor) → ใช้พิกัดจาก BUILDING_COORDS
+                let finalLat = lat, finalLng = lng;
+                if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) {
+                    const coord = getCoordForLocation(d.name);
+                    if (coord) {
+                        finalLat = coord.lat;
+                        finalLng = coord.lng;
+                    } else {
+                        return; // ไม่มีพิกัด ข้าม
+                    }
+                }
+
+                vehiclePaths[vid].push({
+                    lat: finalLat, lng: finalLng,
+                    time: d.time, name: d.name,
+                    floor: d.floor, room: d.room
+                });
+            });
+
+            console.log('📊 vehiclePaths:', Object.keys(vehiclePaths).map(k => k + ': ' + vehiclePaths[k].length + ' pts'));
+        }
+
+        /**
+         * วาดเส้นทางบน Leaflet แยกต่อรถแต่ละคัน
+         * — สีตามสถานะงาน + Label ID + Dynamic Coordinates
+         */
+        function renderVehicleRoutes() {
+            // ลบเส้นทางเก่า
+            Object.values(vehicleRouteGroups).forEach(g => {
+                if (g) { g.clearLayers(); map.removeLayer(g); }
+            });
+            vehicleRouteGroups = {};
+
+            const vehicleIds = Object.keys(vehiclePaths);
+            if (!vehicleIds.length) return;
+
+            vehicleIds.forEach((vid, idx) => {
+                // ถ้าเลือกรถอยู่ → ซ่อนคันอื่น
+                if (selectedVehicleId && selectedVehicleId !== vid) return;
+
+                const pts = vehiclePaths[vid];
+                if (!pts || pts.length < 1) return;
+
+                const group = L.featureGroup().addTo(map);
+                vehicleRouteGroups[vid] = group;
+
+                // หาข้อมูลรถจาก fleetVehicles
+                const vInfo = fleetVehicles.find(v => v.vehicleId === vid);
+                const vName = vInfo ? vInfo.name : vid;
+                const vId = vInfo ? vInfo.vehicleId : vid;
+                const isLinen = vInfo ? (vInfo.type || '').includes('ผ้า') : false;
+                const vStatus = vInfo ? (vInfo.status || '').trim() : '';
+
+                // ── กำหนดสี/สไตล์ตามสถานะ ──
+                let routeColor, routeOpacity, routeWeight, routeDash, statusLabel;
+                const jobStatus = getVehicleJobStatus(vId);
+
+                if (jobStatus === 'going') {
+                    // ขาไป → สีเขียว
+                    routeColor = '#00e676';
+                    routeOpacity = 0.85;
+                    routeWeight = 5;
+                    routeDash = null;
+                    statusLabel = '🟢 ขาไป';
+                } else if (jobStatus === 'returning') {
+                    // ขากลับ → สีเหลือง
+                    routeColor = '#ffd600';
+                    routeOpacity = 0.75;
+                    routeWeight = 4;
+                    routeDash = '8, 6';
+                    statusLabel = '🟡 ขากลับ';
+                } else {
+                    // ว่าง → สีจางตามประเภท + เส้นประ
+                    routeColor = VEHICLE_COLORS[idx % VEHICLE_COLORS.length];
+                    routeOpacity = 0.3;
+                    routeWeight = 3;
+                    routeDash = '4, 8';
+                    statusLabel = '⚪ ว่าง';
+                }
+
+                // ── วาดเส้นทาง ──
+                if (pts.length >= 2) {
+                    if (jobStatus === 'available') {
+                        // รถว่าง → วาดเส้นจาง ๆ เฉพาะ 5 จุดล่าสุด
+                        const recentPts = pts.slice(-5);
+                        const coords = recentPts.map(p => [p.lat, p.lng]);
+                        L.polyline(coords, {
+                            color: routeColor, weight: routeWeight,
+                            opacity: routeOpacity, dashArray: routeDash,
+                            lineJoin: 'round'
+                        }).addTo(group);
+                    } else {
+                        // รถทำงานอยู่ → วาดเส้นเต็ม
+                        const coords = pts.map(p => [p.lat, p.lng]);
+
+                        // วาดเส้นหลัก
+                        L.polyline(coords, {
+                            color: routeColor, weight: routeWeight,
+                            opacity: routeOpacity, dashArray: routeDash,
+                            lineJoin: 'round'
+                        }).bindTooltip(
+                            '<div style="text-align:left">' +
+                            '<div style="color:' + routeColor + ';font-weight:600;margin-bottom:3px">' + statusLabel + '</div>' +
+                            '<b>🚛 ' + vName + '</b> (' + vId + ')' +
+                            '<br>📍 จุดล่าสุด: ' + (pts[pts.length - 1].name || '-') +
+                            '<br>📊 จุดบันทึก: ' + pts.length + ' จุด' +
+                            '</div>', {
+                            sticky: true, direction: 'top', className: 'hover-tip'
+                        }).addTo(group);
+
+                        // วาด hitbox เส้นใสสำหรับ hover (ง่ายต่อการคลิก)
+                        L.polyline(coords, {
+                            color: routeColor, weight: 18, opacity: 0
+                        }).bindTooltip('🚛 ' + vName + ' — ' + statusLabel, {
+                            sticky: true, direction: 'top', className: 'hover-tip'
+                        }).addTo(group);
+                    }
+
+                    // วาง intermediate markers (จุดกลาง) แบบเล็กๆ
+                    pts.forEach((pt, pi) => {
+                        if (pi === pts.length - 1) return; // ข้ามจุดสุดท้าย (จะวาด marker ใหญ่)
+                        if (pi === 0 || (pts.length > 10 && pi % Math.ceil(pts.length / 8) !== 0)) return; // ข้ามบางจุดถ้าเยอะ
+
+                        L.circleMarker([pt.lat, pt.lng], {
+                            radius: 3, color: routeColor, fillColor: routeColor,
+                            fillOpacity: 0.6, weight: 1
+                        }).bindTooltip(
+                            '<b>' + (pt.name || 'จุด ' + (pi + 1)) + '</b>' +
+                            (pt.floor && pt.floor !== '-' ? '<br>ชั้น ' + pt.floor : '') +
+                            '<br>🕒 ' + (pt.time || '-'),
+                            { direction: 'top', className: 'hover-tip' }
+                        ).addTo(group);
+                    });
+                }
+
+                // ── วาง Marker หลักที่จุดล่าสุด ──
+                const lastPt = pts[pts.length - 1];
+
+                // Marker วงกลมมีไอคอน
+                const markerIcon = L.divIcon({
+                    className: '',
+                    html: '<div style="' +
+                        'width:32px;height:32px;' +
+                        'background:' + routeColor + ';' +
+                        'border-radius:50%;' +
+                        'border:3px solid #fff;' +
+                        'display:flex;align-items:center;justify-content:center;' +
+                        'font-size:15px;' +
+                        'box-shadow:0 3px 12px rgba(0,0,0,0.5);' +
+                        '">' + (isLinen ? '🧺' : '🍱') + '</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+
+                L.marker([lastPt.lat, lastPt.lng], { icon: markerIcon })
+                    .bindTooltip(
+                        '<div style="text-align:left">' +
+                        '<div style="color:' + routeColor + ';font-weight:600;font-size:0.7rem;margin-bottom:2px">' + statusLabel + '</div>' +
+                        '<b>' + vName + '</b> (' + vId + ')' +
+                        '<br>📍 ' + (lastPt.name || 'ไม่ระบุ') +
+                        (lastPt.floor && lastPt.floor !== '-' ? '<br>🏢 ชั้น ' + lastPt.floor : '') +
+                        (lastPt.room && lastPt.room !== '-' ? ' / ห้อง ' + lastPt.room : '') +
+                        '<br>🕒 ' + (lastPt.time || '-') +
+                        '</div>',
+                        { direction: 'top', className: 'hover-tip' }
+                    ).addTo(group);
+
+                // ── Label ID ถาวร (แสดงข้างๆ Marker) ──
+                const labelIcon = L.divIcon({
+                    className: '',
+                    html: '<div style="' +
+                        'background:rgba(12,12,20,0.88);' +
+                        'backdrop-filter:blur(8px);' +
+                        'border:1px solid ' + routeColor + ';' +
+                        'border-radius:6px;' +
+                        'padding:2px 7px;' +
+                        'font-family:Kanit,sans-serif;' +
+                        'font-size:0.65rem;' +
+                        'font-weight:600;' +
+                        'color:' + routeColor + ';' +
+                        'white-space:nowrap;' +
+                        'box-shadow:0 2px 8px rgba(0,0,0,0.4);' +
+                        'pointer-events:none;' +
+                        '">' + vId + '</div>',
+                    iconSize: [60, 20],
+                    iconAnchor: [-18, 10]  // offset ไปทางขวาของ marker
+                });
+                L.marker([lastPt.lat, lastPt.lng], { icon: labelIcon, interactive: false, zIndexOffset: 200 }).addTo(group);
+
+                // ── Pulse effect ──
+                const pulseIcon = L.divIcon({
+                    className: '',
+                    html: '<div class="live-pulse-ring" style="' +
+                        'width:26px;height:26px;' +
+                        'background:radial-gradient(circle, ' + routeColor + ' 0%, transparent 70%);' +
+                        'opacity:' + (jobStatus === 'available' ? '0.2' : '0.5') + ';' +
+                        '"></div>',
+                    iconSize: [26, 26],
+                    iconAnchor: [13, 13]
+                });
+                L.marker([lastPt.lat, lastPt.lng], { icon: pulseIcon, interactive: false, zIndexOffset: -100 }).addTo(group);
+            });
+        }
+
+        /**
+         * ดึงสถานะงานของรถจาก Job_Log (ผ่าน fleetVehicles.status)
+         * @returns {'going'|'returning'|'available'}
+         */
+        function getVehicleJobStatus(vehicleId) {
+            const v = fleetVehicles.find(v => v.vehicleId === vehicleId);
+            if (!v) return 'available';
+
+            const status = (v.status || '').trim().toLowerCase();
+
+            // ขาไป
+            if (status.includes('busy') || status.includes('ทำงาน') ||
+                status.includes('transit') || status.includes('on the way') ||
+                status.includes('assigned') || status.includes('ดำเนินการ')) {
+                return 'going';
+            }
+
+            // ขากลับ
+            if (status.includes('returning') || status.includes('กลับ') ||
+                status.includes('completed') || status.includes('เสร็จ')) {
+                return 'returning';
+            }
+
+            // ว่าง
+            return 'available';
+        }
+
+        // ============================================================
+        // CAMPUS DIGITAL TWIN — Code-Based Building Map
+        // ============================================================
+
+        // ── locationMap: key=Code, value={name,code,icon,lat,lng,type} ──
+        let locationMap = {};
+        const ICON_HINTS = {
+            'เลิศ': '🏥', 'ซักผ้า': '🧺', 'ครัว': '🍳', 'อาหาร': '🍽️', 'ยา': '💊',
+            'ER': '🚑', 'เวช': '🏪', 'พยาบาล': '🏢', 'คลัง': '📦', 'ผ่าตัด': '⚕️',
+            'หอพัก': '🏠', 'จอดรถ': '🅿️', 'ซ่อม': '🔧', 'เย็น': '❄️'
+        };
+
+        function guessIcon(name) {
+            for (const [hint, icon] of Object.entries(ICON_HINTS)) {
+                if (name.includes(hint)) return icon;
+            }
+            return '📍';
+        }
+
+        /**
+         * โหลดพิกัดจาก Sheet 'Locations' → สร้าง locationMap (key=Code)
+         */
+        async function loadLocationsFromSheet() {
+            try {
+                let locations = [];
+                if (typeof google !== 'undefined' && google.script) {
+                    locations = await new Promise((resolve, reject) => {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getLocations();
+                    });
+                } else {
+                    try {
+                        const resp = await fetch(SCRIPT_URL + '&action=getLocations');
+                        if (resp.ok) { const j = await resp.json(); if (Array.isArray(j)) locations = j; }
+                    } catch (e) { console.log('ℹ️ ไม่สามารถโหลด Locations'); }
+                }
+                if (locations.length === 0) { console.log('⚠️ ไม่มีข้อมูล Locations'); return; }
+
+                console.log('📍 โหลด Locations:', locations.length);
+
+                // สร้าง BUILDING_COORDS + locationMap (key = code)
+                BUILDING_COORDS = {};
+                locationMap = {};
+                locations.forEach(loc => {
+                    if (!loc.name || !loc.code) return;
+                    BUILDING_COORDS[loc.name] = { lat: loc.lat, lng: loc.lng };
+                    BUILDING_COORDS[loc.code] = { lat: loc.lat, lng: loc.lng };
+                    locationMap[loc.code] = {
+                        name: loc.name, code: loc.code,
+                        lat: loc.lat || 0, lng: loc.lng || 0,
+                        type: loc.type || '', icon: guessIcon(loc.name)
+                    };
+                });
+
+                locationsLoaded = true;
+                console.log('✅ locationMap:', Object.keys(locationMap).length, 'entries');
+                initCampusDigitalTwin();
+            } catch (e) { console.error('❌ loadLocationsFromSheet:', e); }
+        }
+
+        /**
+         * สร้าง Digital Twin: อาคาร E (12 ชั้น) + อาคารอื่น (blocks)
+         */
+        function initCampusDigitalTwin() {
+            // ── อาคาร E: 12 ชั้น ──
+            const grid = document.getElementById('buildingEGrid');
+            if (grid) {
+                grid.innerHTML = '';
+                for (let f = 12; f >= 1; f--) {
+                    const cell = document.createElement('div');
+                    cell.className = 'floor-cell';
+                    cell.dataset.floor = f;
+                    cell.dataset.code = 'E';
+                    cell.innerHTML = '<div class="floor-num">' + f + '</div><div class="floor-info"></div>';
+                    grid.appendChild(cell);
+                }
+            }
+
+            // ── อาคารอื่นๆ ──
+            const area = document.getElementById('otherBuildingsArea');
+            if (area) {
+                area.innerHTML = '';
+                Object.entries(locationMap).forEach(([code, loc]) => {
+                    if (code === 'E') return; // ข้ามอาคาร E (แสดงแยก)
+                    const block = document.createElement('div');
+                    block.className = 'campus-block';
+                    block.dataset.code = code;
+                    block.innerHTML =
+                        '<div class="block-code">' + code + '</div>' +
+                        '<div class="block-icon">' + loc.icon + '</div>' +
+                        '<div class="block-name">' + loc.name + '</div>' +
+                        '<div class="block-sub">' + loc.type + '</div>' +
+                        '<div class="block-vehicle-info"></div>';
+                    area.appendChild(block);
+                });
+            }
+        }
+
+        /**
+         * Master update สำหรับ Campus Digital Twin
+         * ดึงข้อมูลรถจาก fleetVehicles → จับคู่ Code → กระพริบบล็อก/ชั้น
+         */
+        function updateCampusView() {
+            // ── 1. ล้างสถานะเก่า ──
+            document.querySelectorAll('.floor-cell').forEach(cell => {
+                cell.classList.remove('blink-linen', 'blink-food');
+                const info = cell.querySelector('.floor-info');
+                if (info) { info.textContent = ''; info.style.display = ''; }
+            });
+            document.querySelectorAll('.campus-block').forEach(block => {
+                block.classList.remove('blink-linen', 'blink-food');
+                const info = block.querySelector('.block-vehicle-info');
+                if (info) { info.textContent = ''; info.style.display = 'none'; }
+            });
+
+            // ── 2. รวบรวมตำแหน่งรถทั้งหมด ──
+            if (!fleetVehicles || fleetVehicles.length === 0) return;
+
+            fleetVehicles.forEach(v => {
+                const vid = v.vehicleId;
+                const isLinen = (v.type || '').includes('ผ้า');
+                const blinkClass = isLinen ? 'blink-linen' : 'blink-food';
+
+                // หา lastLocation Code ของรถคันนี้
+                let locCode = '';
+                let locName = v.lastLocation || '';
+
+                // ถ้ามี vehiclePaths → ดูจุดล่าสุด
+                if (vehiclePaths[vid] && vehiclePaths[vid].length > 0) {
+                    const lastPt = vehiclePaths[vid][vehiclePaths[vid].length - 1];
+                    locName = lastPt.name || locName;
+                }
+
+                // แปลง Name → Code (ค้นหาใน locationMap)
+                if (locName) {
+                    // ลอง exact match กับ code ก่อน
+                    if (locationMap[locName]) {
+                        locCode = locName;
+                    } else {
+                        // ค้นหาจาก name
+                        for (const [code, loc] of Object.entries(locationMap)) {
+                            if (loc.name === locName || locName.includes(loc.name) || loc.name.includes(locName)) {
+                                locCode = code;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!locCode) return; // ไม่พบ Code
+
+                // ── 3. กระพริบบล็อก/ชั้น ──
+                if (locCode === 'E') {
+                    // อาคาร E → หาชั้นจาก floor data
+                    let floorNum = 1;
+                    if (vehiclePaths[vid] && vehiclePaths[vid].length > 0) {
+                        const lastPt = vehiclePaths[vid][vehiclePaths[vid].length - 1];
+                        floorNum = parseInt(lastPt.floor) || 1;
+                    }
+                    const cell = document.querySelector('.floor-cell[data-floor="' + floorNum + '"]');
+                    if (cell) {
+                        cell.classList.add(blinkClass);
+                        const info = cell.querySelector('.floor-info');
+                        if (info) {
+                            const existing = info.textContent;
+                            info.textContent = (existing ? existing + ' | ' : '') + vid + ' ' + (locName || '');
+                        }
+                    }
+                } else {
+                    // อาคารอื่น → หาบล็อก
+                    const block = document.querySelector('.campus-block[data-code="' + locCode + '"]');
+                    if (block) {
+                        block.classList.add(blinkClass);
+                        const info = block.querySelector('.block-vehicle-info');
+                        if (info) {
+                            const existing = info.textContent;
+                            info.textContent = (existing ? existing + ' | ' : '') +
+                                (isLinen ? '🧺' : '🍱') + ' ' + vid;
+                        }
+                    }
+                }
+            });
+        }
+
+        // ============================================================
+        // INIT
+        // ============================================================
+        window.onload = function () {
+            initBuilding();
+            initMap();
+            initCampusDigitalTwin();
+            initMQTT();
+
+            // Restore last indoor state immediately (before fetch)
+            const savedState = loadIndoorState();
+            if (savedState) {
+                updateUI(savedState);
+            }
+
+            fetchHistory();
+            setInterval(fetchHistory, AUTO_REFRESH);
+
+            // โหลดพิกัดจริงจาก Locations Sheet ก่อน
+            setTimeout(loadLocationsFromSheet, 1000);
+
+            // โหลด Fleet หลังจากดึง History + Locations
+            setTimeout(loadFleet, 3000);
+            setInterval(loadFleet, 30000);  // refresh ทุก 30 วินาที
+
+            // อัปเดต Campus Digital Twin ทุก 5 วินาที
+            setInterval(() => {
+                if (document.getElementById('viewCampus').classList.contains('active')) {
+                    updateCampusView();
+                }
+            }, 5000);
+        };
+    </script>
+</body>
+
+</html>
